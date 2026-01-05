@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 账号密码登录</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <script defer src="/static/js/alpine.min.js"></script>
+    <style>
+        .login-icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .login-title {
+            font-size: 20px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .login-button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+
+        .login-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .login-button:active {
+            transform: translateY(0);
+        }
+
+        .error-message {
+            text-align: center;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" x-data="loginForm()">
+        <div class="header">
+            <div class="login-icon">登录</div>
+            <h1 class="login-title">账号密码登录</h1>
+        </div>
+
+        <form @submit.prevent="handleLogin()">
+            <div class="form-group">
+                <label class="form-label">账号</label>
+                <input
+                    type="text"
+                    class="form-input"
+                    x-model="username"
+                    placeholder="请输入账号"
+                    autocomplete="username"
+                    required
+                />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">密码</label>
+                <input
+                    type="password"
+                    class="form-input"
+                    x-model="password"
+                    placeholder="请输入密码"
+                    autocomplete="current-password"
+                    required
+                />
+            </div>
+
+            <div class="error-message" x-show="errorMessage" x-text="errorMessage"></div>
+
+            <button type="submit" class="login-button">登录</button>
+        </form>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        function loginForm() {
+            return {
+                username: '',
+                password: '',
+                errorMessage: '',
+
+                async handleLogin() {
+                    this.errorMessage = '';
+
+                    if (!this.username.trim() || !this.password) {
+                        this.errorMessage = '请输入账号和密码';
+                        return;
+                    }
+
+                    const result = await apiRequest('/login', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            username: this.username.trim(),
+                            password: this.password
+                        })
+                    });
+
+                    if (result.ok && result.data.success) {
+                        navigateTo('/dashboard');
+                    } else {
+                        this.errorMessage = result.data.message || '登录失败，请检查账号密码';
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+
+# PHP相关（原项目文件）
+vendor
+composer.lock
+*.php
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# 测试
+.pytest_cache
+.coverage
+htmlcov
+
+# 其他
+*.md
+*.log
+.DS_Store
+qrcode.png
+

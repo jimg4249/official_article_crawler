@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>离线通知配置</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <script defer src="/static/js/alpine.min.js"></script>
+    <style>
+        .radio-group {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .radio-option input[type="radio"] {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+        }
+
+        .radio-option label {
+            cursor: pointer;
+            color: #333;
+            font-size: 14px;
+            margin: 0;
+        }
+
+        .form-help {
+            color: #999;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="modal-overlay" x-data="notificationConfig()" x-init="loadConfig()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title">离线通知配置</h2>
+                <button class="close-button" @click="handleClose()">&times;</button>
+            </div>
+
+            <form @submit.prevent="saveConfig()">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">选择通知方式</label>
+                        <div class="radio-group">
+                            <div class="radio-option">
+                                <input
+                                    type="radio"
+                                    id="dingtalk"
+                                    value="dingtalk"
+                                    x-model="selectedType"
+                                    @change="switchType()"
+                                />
+                                <label for="dingtalk">钉钉机器人</label>
+                            </div>
+                            <div class="radio-option">
+                                <input
+                                    type="radio"
+                                    id="wecom"
+                                    value="wecom"
+                                    x-model="selectedType"
+                                    @change="switchType()"
+                                />
+                                <label for="wecom">企微机器人</label>
+                            </div>
+                            <div class="radio-option">
+                                <input
+                                    type="radio"
+                                    id="feishu"
+                                    value="feishu"
+                                    x-model="selectedType"
+                                    @change="switchType()"
+                                />
+                                <label for="feishu">飞书机器人</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Webhook地址</label>
+                        <input
+                            type="url"
+                            class="form-input"
+                            x-model="currentConfig.webhook_url"
+                            :placeholder="webhookPlaceholder"
+                            required
+                        />
+                        <div class="form-help">请输入机器人的Webhook地址</div>
+                    </div>
+
+                    <div class="form-group" x-show="selectedType !== 'wecom'">
+                        <label class="form-label">Secret（必填）</label>
+                        <input
+                            type="text"
+                            class="form-input"
+                            x-model="currentConfig.secret"
+                            placeholder="SECxxx"
+                            :required="selectedType !== 'wecom'"
+                        />
+                        <div class="form-help">钉钉和飞书机器人需要填写Secret用于签名验证</div>
+                    </div>
+
+                    <div class="error-message" x-show="errorMessage" x-text="errorMessage"></div>
+                    <div class="success-message" x-show="successMessage" x-text="successMessage"></div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-cancel" @click="handleClose()">取消</button>
+                    <button type="submit" class="btn btn-confirm">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        function notificationConfig() {
+            return {
+                selectedType: 'dingtalk',
+                configs: {
+                    dingtalk: { webhook_url: '', secret: '' },
+                    wecom: { webhook_url: '', secret: '' },
+                    feishu: { webhook_url: '', secret: '' }
+                },
+                errorMessage: '',
+                successMessage: '',
+
+                get currentConfig() {
+                    return this.configs[this.selectedType];
+                },
+
+                get webhookPlaceholder() {
+                    const placeholders = {
+                        dingtalk: 'https://oapi.dingtalk.com/robot/send?access_token=xxx',
+                        wecom: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx',
+                        feishu: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxx'
+                    };
+                    return placeholders[this.selectedType];
+                },
+
+                async loadConfig() {
+                    const result = await apiRequest('/notification-config', {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' }
+                    });
+
+                    if (result.ok && result.data.success && result.data.config) {
+                        const config = result.data.config;
+                        this.selectedType = config.selected_type || 'dingtalk';
+                        this.configs.dingtalk = config.dingtalk || { webhook_url: '', secret: '' };
+                        this.configs.wecom = config.wecom || { webhook_url: '', secret: '' };
+                        this.configs.feishu = config.feishu || { webhook_url: '', secret: '' };
+                    }
+                },
+
+                switchType() {
+                    this.errorMessage = '';
+                    this.successMessage = '';
+                },
+
+                async saveConfig() {
+                    this.errorMessage = '';
+                    this.successMessage = '';
+
+                    const result = await apiRequest('/notification-config', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            selected_type: this.selectedType,
+                            dingtalk: this.configs.dingtalk,
+                            wecom: this.configs.wecom,
+                            feishu: this.configs.feishu
+                        })
+                    });
+
+                    if (result.ok && result.data.success) {
+                        navigateTo('/dashboard');
+                    } else {
+                        this.errorMessage = result.data.message || '保存配置失败';
+                    }
+                },
+
+                handleClose() {
+                    navigateTo('/dashboard');
+                }
+            };
+        }
+    </script>
+</body>
+</html>

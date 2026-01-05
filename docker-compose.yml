@@ -1,0 +1,26 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wechat-article-crawler
+    platform: linux/amd64
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./cache:/app/cache
+    environment:
+      - TZ=Asia/Shanghai
+      - API_TOKEN=${API_TOKEN}
+      - SOCKS_PROXY_HOST=${SOCKS_PROXY_HOST}
+      - SOCKS_PROXY_PORT=${SOCKS_PROXY_PORT}
+      - SOCKS_PROXY_USERNAME=${SOCKS_PROXY_USERNAME}
+      - SOCKS_PROXY_PASSWORD=${SOCKS_PROXY_PASSWORD}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+

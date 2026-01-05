@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>扫码登录</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <script defer src="/static/js/alpine.min.js"></script>
+    <style>
+        .qrcode-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+        }
+
+        .qrcode-image {
+            width: 280px;
+            height: 280px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            background: #f5f5f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qrcode-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-text {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .status-text.success {
+            color: #11998e;
+        }
+
+        .status-text.error {
+            color: #f5576c;
+        }
+
+        .tip-text {
+            font-size: 14px;
+            color: #999;
+            text-align: center;
+            max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div class="modal-overlay" x-data="wechatLogin()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title">扫码登录</h2>
+                <button class="close-button" @click="handleClose()">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="qrcode-container">
+                    <template x-if="loading">
+                        <div class="qrcode-image">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </template>
+
+                    <template x-if="!loading && qrcodeUrl">
+                        <div class="qrcode-image">
+                            <img :src="qrcodeUrl" alt="登录二维码" />
+                        </div>
+                    </template>
+
+                    <div class="status-text" :class="{ 'success': isSuccess, 'error': isError }" x-text="statusText"></div>
+
+                    <div class="tip-text" x-show="!isSuccess && !isError">
+                        请使用微信扫描二维码登录公众号
+                    </div>
+                </div>
+
+                <div class="error-message" x-show="errorMessage" x-text="errorMessage"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-cancel" @click="handleClose()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        function wechatLogin() {
+            return {
+                loading: true,
+                qrcodeUrl: '',
+                statusText: '正在加载二维码...',
+                errorMessage: '',
+                isSuccess: false,
+                isError: false,
+                pollTimer: null,
+
+                async init() {
+                    await this.fetchQRCode();
+                    this.startPolling();
+                },
+
+                async fetchQRCode() {
+                    try {
+                        const response = await fetch('/wechat-qrcode', {
+                            method: 'GET',
+                            credentials: 'include'
+                        });
+
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            this.qrcodeUrl = URL.createObjectURL(blob);
+                            this.loading = false;
+                            this.statusText = '请使用微信扫码';
+                        } else {
+                            const data = await response.json();
+                            this.errorMessage = data.message || '获取二维码失败';
+                            this.loading = false;
+                            this.isError = true;
+                            this.statusText = '获取二维码失败';
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch QR code:', error);
+                        this.errorMessage = '网络请求失败';
+                        this.loading = false;
+                        this.isError = true;
+                        this.statusText = '网络请求失败';
+                    }
+                },
+
+                startPolling() {
+                    this.pollTimer = setInterval(async () => {
+                        await this.checkLoginStatus();
+                    }, 1500);
+                },
+
+                async checkLoginStatus() {
+                    try {
+                        const result = await apiRequest('/wechat-status', {
+                            method: 'POST'
+                        });
+
+                        if (result.ok && result.data.success) {
+                            const statusData = result.data.data;
+
+                            if (statusData.online) {
+                                this.isSuccess = true;
+                                this.statusText = '登录成功！';
+                                this.stopPolling();
+
+                                setTimeout(() => {
+                                    navigateTo('/dashboard');
+                                }, 1000);
+                            } else {
+                                if (statusData.message && statusData.message !== '未登录') {
+                                    this.statusText = statusData.message;
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to check login status:', error);
+                    }
+                },
+
+                stopPolling() {
+                    if (this.pollTimer) {
+                        clearInterval(this.pollTimer);
+                        this.pollTimer = null;
+                    }
+                },
+
+                handleClose() {
+                    this.stopPolling();
+                    navigateTo('/dashboard');
+                },
+
+                destroy() {
+                    this.stopPolling();
+                    if (this.qrcodeUrl) {
+                        URL.revokeObjectURL(this.qrcodeUrl);
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>

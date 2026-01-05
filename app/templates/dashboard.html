@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台管理</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <script defer src="/static/js/alpine.min.js"></script>
+    <style>
+        .avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            overflow: hidden;
+            background: #f0f0f0;
+        }
+
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .dashboard-title {
+            font-size: 22px;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .last-login {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .last-login span {
+            color: #666;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .action-button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 15px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 500;
+            text-align: center;
+            text-decoration: none;
+            display: block;
+        }
+
+        .action-button:hover {
+            transform: translateY(-2px);
+        }
+
+        .action-button:active {
+            transform: translateY(0);
+        }
+
+        .btn-register {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .btn-register:hover {
+            box-shadow: 0 5px 15px rgba(17, 153, 142, 0.4);
+        }
+
+        .btn-connect {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-connect:hover {
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-change-password {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-change-password:hover {
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.4);
+        }
+
+        .btn-logout {
+            background: linear-gradient(135deg, #f5576c 0%, #d63447 100%);
+            color: white;
+        }
+
+        .btn-logout:hover {
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.4);
+        }
+
+        .login-info {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.8;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .login-info-item {
+            display: flex;
+            width: 100%;
+        }
+
+        .login-info-label {
+            color: #999;
+            min-width: 110px;
+            text-align: left;
+        }
+
+        .login-info-value {
+            color: #333;
+            font-weight: 500;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" x-data="dashboard()" x-init="init()">
+        <div class="header">
+            <div class="avatar">
+                <img :src="avatarUrl" alt="用户头像">
+            </div>
+
+            <h1 class="dashboard-title" x-text="isOnline ? (nickname || '公众号已登录') : '未登录公众号'"></h1>
+
+            <div x-show="!isOnline" class="last-login">
+                离线时间：<span x-text="lastLogin"></span>
+            </div>
+
+            <div x-show="isOnline" class="login-info">
+                <div class="login-info-item">
+                    <span class="login-info-label">最近登录时间</span>
+                    <span class="login-info-value" x-text="loginTime"></span>
+                </div>
+                <div class="login-info-item">
+                    <span class="login-info-label">已登录时长</span>
+                    <span class="login-info-value" x-text="loginDuration"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-buttons">
+            <button x-show="!isOnline" class="action-button btn-register" @click="handleRegister()">
+                登录公众号
+            </button>
+
+            <button x-show="isOnline" class="action-button btn-logout" @click="handleLogout()">
+                退出登录
+            </button>
+
+            <button class="action-button btn-connect" @click="handleConnect()">
+                离线通知
+            </button>
+
+            <button class="action-button btn-change-password" @click="handleChangePassword()">
+                修改密码
+            </button>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        function dashboard() {
+            return {
+                isOnline: false,
+                lastLogin: '',
+                loginTime: '',
+                loginDuration: '',
+                loginTimestamp: 0,
+                durationTimer: null,
+                avatarUrl: 'https://ui-avatars.com/api/?name=User&size=300&background=667eea&color=fff&bold=true',
+                nickname: '',
+
+                async init() {
+                    await this.checkLoginStatus();
+
+                    if (this.isOnline) {
+                        this.startDurationTimer();
+                    } else {
+                        if (!this.lastLogin) {
+                            this.updateLastLogin();
+                        }
+                    }
+                },
+
+                updateLastLogin() {
+                    const now = new Date();
+                    this.lastLogin = formatDateTime(now);
+                },
+
+                async checkLoginStatus() {
+                    try {
+                        const result = await apiRequest('/wechat-status', {
+                            method: 'POST'
+                        });
+
+                        if (result.ok && result.data.success) {
+                            const statusData = result.data.data;
+                            this.isOnline = statusData.online;
+
+                            if (statusData.headimgurl) {
+                                this.avatarUrl = statusData.headimgurl;
+                            } else {
+                                this.avatarUrl = 'https://ui-avatars.com/api/?name=User&size=300&background=667eea&color=fff&bold=true';
+                            }
+
+                            if (statusData.nickname) {
+                                this.nickname = statusData.nickname;
+                            } else {
+                                this.nickname = '';
+                            }
+
+                            if (this.isOnline && statusData.login_time) {
+                                this.loginTimestamp = statusData.login_time * 1000;
+                                this.loginTime = formatDateTime(new Date(this.loginTimestamp));
+                                this.updateLoginDuration();
+                            } else if (!this.isOnline && statusData.logout_time) {
+                                const logoutTimestamp = statusData.logout_time * 1000;
+                                this.lastLogin = formatDateTime(new Date(logoutTimestamp));
+                            } else if (!this.isOnline) {
+                                this.updateLastLogin();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to check login status:', error);
+                    }
+                },
+
+                startDurationTimer() {
+                    this.durationTimer = setInterval(() => {
+                        this.updateLoginDuration();
+                    }, 1000);
+                },
+
+                updateLoginDuration() {
+                    if (!this.loginTimestamp) return;
+
+                    const now = Date.now();
+                    const diff = Math.floor((now - this.loginTimestamp) / 1000);
+
+                    const hours = Math.floor(diff / 3600);
+                    const minutes = Math.floor((diff % 3600) / 60);
+                    const seconds = diff % 60;
+
+                    if (hours > 0) {
+                        this.loginDuration = `${hours}小时${minutes}分${seconds}秒`;
+                    } else if (minutes > 0) {
+                        this.loginDuration = `${minutes}分${seconds}秒`;
+                    } else {
+                        this.loginDuration = `${seconds}秒`;
+                    }
+                },
+
+                handleRegister() {
+                    navigateTo('/wechat-login');
+                },
+
+                async handleLogout() {
+                    if (!confirm('确定要退出微信登录吗？')) {
+                        return;
+                    }
+
+                    const result = await apiRequest('/wechat-logout', {
+                        method: 'POST'
+                    });
+
+                    if (result.ok && result.data.success) {
+                        if (this.durationTimer) {
+                            clearInterval(this.durationTimer);
+                            this.durationTimer = null;
+                        }
+
+                        this.isOnline = false;
+                        this.loginTimestamp = 0;
+                        this.updateLastLogin();
+                        this.avatarUrl = 'https://ui-avatars.com/api/?name=User&size=300&background=667eea&color=fff&bold=true';
+                        this.nickname = '';
+                    } else {
+                        alert(result.data.message || '退出登录失败');
+                    }
+                },
+
+                handleConnect() {
+                    navigateTo('/notification-config');
+                },
+
+                handleChangePassword() {
+                    navigateTo('/change-password');
+                },
+            };
+        }
+    </script>
+</body>
+</html>
