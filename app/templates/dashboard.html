@@ -170,6 +170,12 @@
             <button class="action-button btn-change-password" @click="handleChangePassword()">
                 修改密码
             </button>
+
+            {% if is_admin %}
+            <a class="action-button btn-connect" href="/users">用户管理</a>
+            {% endif %}
+
+            <a class="action-button btn-logout" href="/logout">退出后台</a>
         </div>
     </div>
 

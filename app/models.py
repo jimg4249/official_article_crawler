@@ -17,6 +17,7 @@ class ArticlesByUrlRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
     url: str = Field(..., description="公众号文章链接")
     number: int = Field(default=20, ge=1, description="需要获取的文章总条数")
+    wechat_username: str | None = Field(default=None, description="使用哪个后台账号的公众号会话（默认admin）")
 
 class LoginRequest(BaseModel):
     username: str = Field(..., description="用户名")
@@ -34,3 +35,7 @@ class NotificationConfigRequest(BaseModel):
     dingtalk: RobotConfig = Field(default_factory=RobotConfig, description="钉钉机器人配置")
     wecom: RobotConfig = Field(default_factory=RobotConfig, description="企微机器人配置")
     feishu: RobotConfig = Field(default_factory=RobotConfig, description="飞书机器人配置")
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")

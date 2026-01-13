@@ -21,11 +21,12 @@ class WechatClient:
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
     )
     
-    def __init__(self, cache_dir: str = "./cache"):
+    def __init__(self, cache_dir: str = "./cache", user_key: str = "default"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._session: Optional[aiohttp.ClientSession] = None
         self._scan_task: Optional[asyncio.Task] = None
+        self.user_key = user_key
 
         self.api_password = os.getenv("API_PASSWORD")
         self.proxy_host = os.getenv("SOCKS_PROXY_HOST")
@@ -44,7 +45,8 @@ class WechatClient:
             log("[代理] 未配置SOCKS代理，将使用直连")
     
     def _get_cookie_cache_key(self) -> str:
-        return "wechat_official_proxy_http_client_cookie"
+        # 按后台登录账号隔离微信 cookie/token 缓存，避免多账号互相覆盖
+        return f"wechat_official_proxy_http_client_cookie::{self.user_key}"
 
     def _get_cache_file_path(self, key: str) -> Path:
         return self.cache_dir / f"{hashlib.md5(key.encode()).hexdigest()}.json"
@@ -553,11 +555,21 @@ class WechatClient:
             raise Exception(f"提取biz值失败: {str(e) or '未知错误'}")
 
 
-# 全局客户端实例
-_wechat_client: Optional[WechatClient] = None
+# 按用户缓存客户端实例（避免频繁重建 session/任务）
+_wechat_clients: dict[str, WechatClient] = {}
 
-def get_wechat_client() -> WechatClient:
-    global _wechat_client
-    if _wechat_client is None:
-        _wechat_client = WechatClient()
-    return _wechat_client
+def get_wechat_client(username: str | None = None) -> WechatClient:
+    user_key = (username or "default").strip() or "default"
+    client = _wechat_clients.get(user_key)
+    if client is None:
+        client = WechatClient(user_key=user_key)
+        _wechat_clients[user_key] = client
+    return client
+
+async def close_all_wechat_clients() -> None:
+    for client in list(_wechat_clients.values()):
+        try:
+            await client.close()
+        except Exception:
+            pass
+    _wechat_clients.clear()

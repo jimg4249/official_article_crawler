@@ -20,21 +20,26 @@ from app.models import (
     LoginRequest,
     ChangePasswordRequest,
     NotificationConfigRequest,
+    UserCreateRequest,
 )
-from app.wechat import get_wechat_client
+from app.wechat import get_wechat_client, close_all_wechat_clients
 from app.auth import (
     verify_user,
     change_password,
     init_users,
     load_notification_config,
     save_notification_config,
+    load_users,
+    create_user,
+    delete_user,
+    is_admin,
 )
 from app.notification import NotificationSender
 from app.utils import log
 
 scheduler = AsyncIOScheduler()
 request_semaphore = asyncio.Semaphore(5)
-last_notification_time: int = 0
+last_notification_time_by_user: dict[str, int] = {}
 
 class ConcurrencyLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -96,7 +101,7 @@ class PersistentSessionMiddleware(BaseHTTPMiddleware):
 
         return response
 
-async def send_offline_notification():
+async def send_offline_notification(username: str):
     try:
         current_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         message = f"【公众号离线通知】\n公众号已离线，请及时登录。\n检测时间：{current_time_str}"
@@ -108,76 +113,85 @@ async def send_offline_notification():
             log("[离线通知] 未找到通知配置文件，跳过通知")
             return
 
-        for username, config in all_configs.items():
-            selected_type = config.get("selected_type")
-            if not selected_type:
-                log(f"[离线通知] 用户 {username} 未配置通知类型，跳过")
-                continue
+        config = all_configs.get(username)
+        if not config:
+            log(f"[离线通知] 用户 {username} 未配置通知，跳过")
+            return
 
-            robot_config = config.get(selected_type, {})
-            webhook_url = robot_config.get("webhook_url", "")
-            secret = robot_config.get("secret", "")
+        selected_type = config.get("selected_type")
+        if not selected_type:
+            log(f"[离线通知] 用户 {username} 未配置通知类型，跳过")
+            return
 
-            if not webhook_url:
-                log(f"[离线通知] 用户 {username} 未配置 {selected_type} Webhook，跳过")
-                continue
+        robot_config = config.get(selected_type, {})
+        webhook_url = robot_config.get("webhook_url", "")
+        secret = robot_config.get("secret", "")
 
-            log(f"[离线通知] 向用户 {username} 发送 {selected_type} 通知...")
-            success, msg = await NotificationSender.send_notification(
-                selected_type, webhook_url, secret, message
-            )
+        if not webhook_url:
+            log(f"[离线通知] 用户 {username} 未配置 {selected_type} Webhook，跳过")
+            return
 
-            if success:
-                log(f"[离线通知] 用户 {username} 通知发送成功")
-            else:
-                log(f"[离线通知] 用户 {username} 通知发送失败: {msg}")
+        log(f"[离线通知] 向用户 {username} 发送 {selected_type} 通知...")
+        success, msg = await NotificationSender.send_notification(
+            selected_type, webhook_url, secret, message
+        )
+
+        if success:
+            log(f"[离线通知] 用户 {username} 通知发送成功")
+        else:
+            log(f"[离线通知] 用户 {username} 通知发送失败: {msg}")
 
     except Exception as e:
         log(f"[离线通知] 发送通知异常: {e}")
 
 async def check_online_task():
-    global last_notification_time
+    data = load_users()
+    usernames = [u.get("username") for u in data.get("users", []) if u.get("username")]
 
-    client = get_wechat_client()
-    if client.token:
+    for username in usernames:
+        client = get_wechat_client(username)
+        if not client.token:
+            continue
         try:
             result = await client.is_online()
             if result["online"]:
-                log("[在线检查] 会话正常")
+                continue
+
+            log(f"[在线检查] 用户 {username} 会话已离线: {result['message']}")
+            if not client.logout_time:
+                client.logout_time = int(time.time())
+                log(f"[在线检查] 用户 {username} 已记录退出时间")
+
+            current_time = int(time.time())
+            last_time = last_notification_time_by_user.get(username, 0)
+            time_since_last = current_time - last_time
+
+            if time_since_last >= 60 * 10:
+                await send_offline_notification(username)
+                last_notification_time_by_user[username] = current_time
+                log(f"[在线检查] 用户 {username} 已发送离线通知")
             else:
-                log(f"[在线检查] 会话已离线: {result['message']}")
-                if not client.logout_time:
-                    client.logout_time = int(time.time())
-                    log("[在线检查] 已记录退出时间")
-
-                current_time = int(time.time())
-                time_since_last = current_time - last_notification_time
-
-                if time_since_last >= 60 * 10:
-                    await send_offline_notification()
-                    last_notification_time = current_time
-                    log("[在线检查] 已发送离线通知")
-                else:
-                    remaining = 600 - time_since_last
-                    log(f"[在线检查] 距离上次通知不足10分钟，跳过通知（还需等待 {remaining} 秒）")
+                remaining = 600 - time_since_last
+                log(f"[在线检查] 用户 {username} 距离上次通知不足10分钟，跳过（还需等待 {remaining} 秒）")
         except Exception as e:
-            log(f"[在线检查] 检查异常: {e}")
-    else:
-        log("[在线检查] 未登录，跳过")
+            log(f"[在线检查] 用户 {username} 检查异常: {e}")
 
 async def keep_alive_task():
-    client = get_wechat_client()
-    if client.token:
+    data = load_users()
+    usernames = [u.get("username") for u in data.get("users", []) if u.get("username")]
+
+    for username in usernames:
+        client = get_wechat_client(username)
+        if not client.token:
+            continue
         try:
             success = await client.keep_alive()
             if success:
-                log("[保活任务] 会话保活成功")
+                log(f"[保活任务] 用户 {username} 会话保活成功")
             else:
-                log("[保活任务] 会话保活失败，可能需要重新登录")
+                log(f"[保活任务] 用户 {username} 会话保活失败，可能需要重新登录")
         except Exception as e:
-            log(f"[保活任务] 保活异常: {e}")
-    else:
-        log("[保活任务] 未登录，跳过")
+            log(f"[保活任务] 用户 {username} 保活异常: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -192,8 +206,7 @@ async def lifespan(app: FastAPI):
     yield
 
     scheduler.shutdown()
-    client = get_wechat_client()
-    await client.close()
+    await close_all_wechat_clients()
     log("[关闭] 服务已停止")
 
 
@@ -215,11 +228,12 @@ async def get_articles_by_url(request: ArticlesByUrlRequest) -> dict[str, Any]:
             "message": "密钥不正确",
         }
 
-    client = get_wechat_client()
+    wechat_username = (request.wechat_username or "admin").strip() or "admin"
+    client = get_wechat_client(wechat_username)
     if not client.token:
         return {
             "success": False,
-            "message": "未登录，请先扫码登录",
+            "message": f"未登录，请先用账号 {wechat_username} 扫码登录公众号",
         }
     
     try:
@@ -336,14 +350,76 @@ async def admin_login(request: Request, login_data: LoginRequest):
 @app.get("/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     if not request.state.session.get("logged_in"):
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/", status_code=302)
 
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    username = request.state.session.get("user")
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "username": username,
+            "is_admin": is_admin(username) if username else False,
+        },
+    )
+
+@app.get("/logout")
+async def admin_logout(request: Request):
+    request.state.session.clear()
+    return RedirectResponse(url="/", status_code=302)
+
+@app.get("/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request):
+    if not request.state.session.get("logged_in"):
+        return RedirectResponse(url="/", status_code=302)
+    username = request.state.session.get("user")
+    if not username or not is_admin(username):
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return templates.TemplateResponse("user_management.html", {"request": request})
+
+@app.get("/api/users")
+async def admin_list_users(request: Request):
+    if not request.state.session.get("logged_in"):
+        return JSONResponse(status_code=401, content={"success": False, "message": "未登录"})
+    username = request.state.session.get("user")
+    if not username or not is_admin(username):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无权限"})
+
+    data = load_users()
+    users = [{"username": u.get("username", ""), "is_admin": bool(u.get("is_admin"))} for u in data.get("users", [])]
+    return JSONResponse(content={"success": True, "users": users})
+
+@app.post("/api/users")
+async def admin_create_user(request: Request, body: UserCreateRequest):
+    if not request.state.session.get("logged_in"):
+        return JSONResponse(status_code=401, content={"success": False, "message": "未登录"})
+    username = request.state.session.get("user")
+    if not username or not is_admin(username):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无权限"})
+
+    ok, msg = create_user(body.username, body.password, is_admin_user=False)
+    if not ok:
+        return JSONResponse(status_code=400, content={"success": False, "message": msg})
+    return JSONResponse(content={"success": True, "message": msg})
+
+@app.delete("/api/users/{target_username}")
+async def admin_delete_user(request: Request, target_username: str):
+    if not request.state.session.get("logged_in"):
+        return JSONResponse(status_code=401, content={"success": False, "message": "未登录"})
+    username = request.state.session.get("user")
+    if not username or not is_admin(username):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无权限"})
+    if target_username == "admin":
+        return JSONResponse(status_code=400, content={"success": False, "message": "不允许删除 admin"})
+
+    ok, msg = delete_user(target_username)
+    if not ok:
+        return JSONResponse(status_code=400, content={"success": False, "message": msg})
+    return JSONResponse(content={"success": True, "message": msg})
 
 @app.get("/change-password", response_class=HTMLResponse)
 async def admin_change_password_page(request: Request):
     if not request.state.session.get("logged_in"):
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/", status_code=302)
 
     return templates.TemplateResponse("change_password.html", {"request": request})
 
@@ -382,7 +458,7 @@ async def admin_change_password(request: Request, password_data: ChangePasswordR
 @app.get("/notification-config")
 async def admin_notification_config_page(request: Request):
     if not request.state.session.get("logged_in"):
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/", status_code=302)
 
     accept_header = request.headers.get("accept", "")
     if "application/json" in accept_header:
@@ -439,7 +515,7 @@ async def save_notification_config_route(request: Request, config_data: Notifica
 @app.get("/wechat-login", response_class=HTMLResponse)
 async def admin_wechat_login_page(request: Request):
     if not request.state.session.get("logged_in"):
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/", status_code=302)
 
     return templates.TemplateResponse("wechat_login.html", {"request": request})
 
@@ -449,7 +525,8 @@ async def admin_wechat_qrcode(request: Request):
     if not request.state.session.get("logged_in"):
         raise HTTPException(status_code=401, detail="未登录后台")
 
-    client = get_wechat_client()
+    username = request.state.session.get("user")
+    client = get_wechat_client(username)
 
     try:
         qrcode_bytes = await client.init_login()
@@ -473,7 +550,8 @@ async def admin_wechat_status(request: Request):
             }
         )
 
-    client = get_wechat_client()
+    username = request.state.session.get("user")
+    client = get_wechat_client(username)
 
     try:
         result = await client.is_online()
@@ -512,7 +590,8 @@ async def admin_wechat_logout(request: Request):
             }
         )
 
-    client = get_wechat_client()
+    username = request.state.session.get("user")
+    client = get_wechat_client(username)
 
     try:
         client.clear_cache()
