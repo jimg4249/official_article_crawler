@@ -4,7 +4,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from app.auth import create_user, get_user_by_username, verify_user
+from app.auth import create_user, get_user_by_username
 from app.models import ArticlesByUrlRequest, RegisterRequest, WechatApiAuthRequest
 from app.utils import get_cache_dir
 from app.wechat import get_wechat_client
@@ -23,12 +23,14 @@ def _check_api_token(api_token: str | None) -> tuple[bool, str]:
     return True, ""
 
 
-def _check_account(username: str | None, password: str | None) -> tuple[bool, str]:
-    if not username or not password:
-        return False, "需要提供账号密码"
-    if not verify_user(username, password):
-        return False, "账号或密码错误"
-    return True, ""
+def _require_username(username: str | None) -> tuple[bool, str, str]:
+    u = (username or "").strip()
+    if not u:
+        return False, "需要提供 username", ""
+    # 外部接口只用 API_TOKEN 鉴权，但仍需要存在账号来定位公众号会话
+    if not get_user_by_username(u):
+        return False, "账号不存在，请先调用 /api/register 注册", ""
+    return True, "", u
 
 
 @router.post("/articles-by-url")
@@ -37,11 +39,9 @@ async def get_articles_by_url(request: ArticlesByUrlRequest):
     if not ok:
         return {"success": False, "message": msg}
 
-    ok, msg = _check_account(request.username, request.password)
+    ok, msg, wechat_username = _require_username(request.username)
     if not ok:
         return {"success": False, "message": msg}
-
-    wechat_username = (request.username or "").strip()
 
     client = get_wechat_client(wechat_username)
     if not client.token:
@@ -138,11 +138,9 @@ async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
     if not ok:
         return JSONResponse(status_code=401, content={"success": False, "message": msg})
 
-    ok, msg = _check_account(body.username, body.password)
+    ok, msg, wechat_username = _require_username(body.username)
     if not ok:
-        return JSONResponse(status_code=401, content={"success": False, "message": msg})
-
-    wechat_username = (body.username or "").strip()
+        return JSONResponse(status_code=400, content={"success": False, "message": msg})
 
     client = get_wechat_client(wechat_username)
     try:
@@ -156,7 +154,6 @@ async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
         return JSONResponse(
             content={
                 "success": True,
-                "wechat_username": wechat_username,
                 "qrcode_url": qrcode_url,
             }
         )
@@ -170,11 +167,9 @@ async def api_wechat_status(body: WechatApiAuthRequest):
     if not ok:
         return JSONResponse(status_code=401, content={"success": False, "message": msg})
 
-    ok, msg = _check_account(body.username, body.password)
+    ok, msg, wechat_username = _require_username(body.username)
     if not ok:
-        return JSONResponse(status_code=401, content={"success": False, "message": msg})
-
-    wechat_username = (body.username or "").strip()
+        return JSONResponse(status_code=400, content={"success": False, "message": msg})
 
     client = get_wechat_client(wechat_username)
     try:
@@ -200,7 +195,6 @@ async def api_wechat_status(body: WechatApiAuthRequest):
         return JSONResponse(
             content={
                 "success": True,
-                "wechat_username": wechat_username,
                 "data": {
                     "online": online,
                     "message": result.get("message", ""),

@@ -15,8 +15,7 @@ class ExtractBizRequest(BaseModel):
     url: str = Field(..., description="公众号文章链接")
 class ArticlesByUrlRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
-    username: str | None = Field(default=None, description="后台账号")
-    password: str | None = Field(default=None, description="后台密码")
+    username: str | None = Field(default=None, description="账号（用于选择公众号会话）")
     url: str = Field(..., description="公众号文章链接")
     number: int = Field(default=20, ge=1, description="需要获取的文章总条数")
 
@@ -43,8 +42,7 @@ class UserCreateRequest(BaseModel):
 
 class WechatApiAuthRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
-    username: str | None = Field(default=None, description="后台账号")
-    password: str | None = Field(default=None, description="后台密码")
+    username: str | None = Field(default=None, description="账号（用于选择公众号会话）")
 
 class RegisterRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
