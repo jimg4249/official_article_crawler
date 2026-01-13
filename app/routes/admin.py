@@ -181,6 +181,22 @@ async def admin_wechat_qrcode(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取二维码失败: {str(e)}")
 
+@router.post("/wechat-cancel")
+async def admin_wechat_cancel(request: Request):
+    """
+    前端关闭扫码页面/返回时调用，取消后台轮询任务，避免持续刷日志/占用资源
+    """
+    if not request.state.session.get("logged_in"):
+        return JSONResponse(status_code=401, content={"success": False, "message": "未登录后台"})
+
+    username = request.state.session.get("user")
+    client = get_wechat_client(username)
+    try:
+        client.cancel_scan_poll()
+    except Exception:
+        pass
+    return JSONResponse(content={"success": True})
+
 
 @router.post("/wechat-status")
 async def admin_wechat_status(request: Request):

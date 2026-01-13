@@ -194,13 +194,26 @@
                     }
                 },
 
+                cancelWechatPolling() {
+                    try {
+                        // 页面关闭/跳转时，用 keepalive 避免请求被浏览器中断
+                        fetch('/wechat-cancel', { method: 'POST', credentials: 'include', keepalive: true });
+                    } catch (e) {
+                        // ignore
+                    }
+                },
+
                 handleClose() {
                     this.stopPolling();
+                    this.cancelWechatPolling();
                     navigateTo('/dashboard');
                 },
 
                 destroy() {
                     this.stopPolling();
+                    if (!this.isSuccess) {
+                        this.cancelWechatPolling();
+                    }
                     if (this.qrcodeUrl) {
                         URL.revokeObjectURL(this.qrcodeUrl);
                     }

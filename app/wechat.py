@@ -277,8 +277,7 @@ class WechatClient:
     
     async def init_login(self) -> bytes:
         self.token = None
-        if self._scan_task and not self._scan_task.done():
-            self._scan_task.cancel()
+        self.cancel_scan_poll()
         await self.get("", is_ajax=False)
         
         prelogin_data = {
@@ -314,12 +313,28 @@ class WechatClient:
         self._scan_task = asyncio.create_task(self._poll_scan_status())
         
         return qrcode
+
+    def cancel_scan_poll(self) -> None:
+        """
+        取消扫码状态轮询任务：
+        - 页面关闭/用户取消时调用，避免后台持续轮询与刷日志
+        """
+        if self._scan_task and not self._scan_task.done():
+            self._scan_task.cancel()
+        self._scan_task = None
     
     async def _poll_scan_status(self) -> None:
         log("[扫码] 开始后台轮询扫码状态...")
         
         try:
+            start_ts = time.time()
+            last_status = None
             while True:
+                # 自动超时：避免无人扫码时长期占用资源（默认 2 分钟）
+                if time.time() - start_ts > 120:
+                    log("[扫码] 超时未扫码，停止轮询")
+                    return
+
                 params = {
                     "action": "ask",
                     "lang": "zh_CN",
@@ -328,23 +343,29 @@ class WechatClient:
                 }
                 resp = await self.get("/cgi-bin/scanloginqrcode", params=params)
                 status = resp.get("status", -1)
-                
-                if status == 0:
-                    log("[扫码] 等待扫码中...")
-                elif status == 4:
-                    log("[扫码] 已扫码，等待确认...")
-                elif status == 6:
-                    log("[扫码] 等待验证...")
-                elif status == 1:
+
+                # 只在状态变化时打印，避免“等待扫码中”刷屏
+                if status != last_status:
+                    last_status = status
+                    if status == 0:
+                        log("[扫码] 等待扫码中...")
+                    elif status == 4:
+                        log("[扫码] 已扫码，等待确认...")
+                    elif status == 6:
+                        log("[扫码] 等待验证...")
+                    elif status == 1:
+                        log("[扫码] 扫码成功，正在完成登录...")
+                    else:
+                        log(f"[扫码] 未知状态: {status}，停止轮询")
+                        return
+
+                if status == 1:
                     log("[扫码] 扫码成功，正在完成登录...")
                     success = await self._complete_login()
                     if success:
                         log("[扫码] 登录成功！")
                     else:
                         log("[扫码] 登录失败")
-                    return
-                else:
-                    log(f"[扫码] 未知状态: {status}，停止轮询")
                     return
                 
                 await asyncio.sleep(1)
