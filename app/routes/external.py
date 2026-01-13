@@ -154,7 +154,9 @@ async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
         return JSONResponse(
             content={
                 "success": True,
-                "qrcode_url": qrcode_url,
+                "data": {
+                    "qrcode_url": qrcode_url
+                } 
             }
         )
     except Exception as e:
