@@ -225,7 +225,7 @@ async def api_register(body: RegisterRequest):
         return JSONResponse(
             content={
                 "success": True,
-                "user": {
+                "data": {
                     "username": existed.get("username", username),
                     "is_admin": bool(existed.get("is_admin")) or existed.get("username") == "admin",
                 },
@@ -240,7 +240,7 @@ async def api_register(body: RegisterRequest):
             return JSONResponse(
                 content={
                     "success": True,
-                    "user": {
+                    "data": {
                         "username": existed.get("username", username),
                         "is_admin": bool(existed.get("is_admin")) or existed.get("username") == "admin",
                     },
@@ -252,7 +252,7 @@ async def api_register(body: RegisterRequest):
     return JSONResponse(
         content={
             "success": True,
-            "user": {
+            "data": {
                 "username": created.get("username", username),
                 "is_admin": bool(created.get("is_admin")),
             },
