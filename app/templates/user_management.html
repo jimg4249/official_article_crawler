@@ -7,17 +7,46 @@
     <link rel="stylesheet" href="/static/css/common.css">
     <script defer src="/static/js/alpine.min.js"></script>
     <style>
+        /* 紧凑模式：尽量压缩间距/字号，避免页面过高 */
+        .container {
+            padding: 16px 16px;
+        }
+
+        .header {
+            margin-bottom: 8px;
+        }
+
+        .login-title {
+            font-size: 16px;
+            line-height: 1.2;
+        }
+
+        .form-group {
+            margin-bottom: 10px;
+        }
+
+        .form-label {
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+        .form-input {
+            padding: 10px 10px;
+            font-size: 13px;
+            line-height: 1.2;
+        }
+
         .user-list {
-            margin-top: 10px;
+            margin-top: 8px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 6px;
         }
         .user-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px;
+            padding: 8px 10px;
             border: 1px solid #eee;
             border-radius: 8px;
             background: #fff;
@@ -25,42 +54,78 @@
         .user-meta {
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 2px;
         }
         .user-name {
             font-weight: 600;
             color: #333;
+            font-size: 13px;
+            line-height: 1.2;
         }
         .user-role {
-            font-size: 12px;
+            font-size: 11px;
             color: #999;
         }
         .btn-danger {
             background: linear-gradient(135deg, #f5576c 0%, #d63447 100%);
             color: #fff;
             border: none;
-            padding: 10px 12px;
+            padding: 7px 10px;
             border-radius: 6px;
             cursor: pointer;
+            font-size: 12px;
+            line-height: 1.2;
         }
         .btn-secondary {
             background: #f5f5f5;
             color: #333;
             border: 1px solid #e5e5e5;
-            padding: 10px 12px;
+            padding: 9px 10px;
             border-radius: 6px;
             cursor: pointer;
+            font-size: 13px;
+            line-height: 1.2;
         }
         .btn-primary {
             width: 100%;
-            padding: 14px;
+            padding: 11px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 5px;
-            font-size: 16px;
+            font-size: 14px;
             cursor: pointer;
-            margin-top: 10px;
+            margin-top: 8px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 8px;
+        }
+
+        .toolbar .form-input {
+            margin: 0;
+        }
+
+        .toolbar-meta {
+            font-size: 11px;
+            color: #999;
+            margin-top: 6px;
+        }
+
+        .pager {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .pager button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
     </style>
 </head>
@@ -87,8 +152,22 @@
             <button type="button" class="btn-secondary" style="width:100%; margin-top:10px;" @click="goBack()">返回</button>
         </form>
 
+        <div class="toolbar">
+            <input
+                type="text"
+                class="form-input"
+                style="flex: 1;"
+                placeholder="搜索用户名（支持模糊匹配）"
+                x-model="search"
+                @input="currentPage = 1"
+            />
+        </div>
+        <div class="toolbar-meta">
+            共 <span x-text="filteredUsers.length"></span> 个用户，当前第 <span x-text="currentPage"></span>/<span x-text="totalPages"></span> 页
+        </div>
+
         <div class="user-list">
-            <template x-for="u in users" :key="u.username">
+            <template x-for="u in pagedUsers" :key="u.username">
                 <div class="user-item">
                     <div class="user-meta">
                         <div class="user-name" x-text="u.username"></div>
@@ -97,6 +176,11 @@
                     <button class="btn-danger" x-show="u.username !== 'admin'" @click="handleDelete(u.username)">删除</button>
                 </div>
             </template>
+        </div>
+
+        <div class="pager">
+            <button class="btn-secondary" @click="prevPage()" :disabled="currentPage <= 1">上一页</button>
+            <button class="btn-secondary" @click="nextPage()" :disabled="currentPage >= totalPages">下一页</button>
         </div>
     </div>
 
@@ -109,9 +193,39 @@
                 newPassword: '',
                 errorMessage: '',
                 successMessage: '',
+                search: '',
+                pageSize: 5,
+                currentPage: 1,
 
                 async init() {
                     await this.loadUsers();
+                },
+
+                get filteredUsers() {
+                    const q = (this.search || '').trim().toLowerCase();
+                    if (!q) return this.users;
+                    return (this.users || []).filter(u => (u.username || '').toLowerCase().includes(q));
+                },
+
+                get totalPages() {
+                    const total = this.filteredUsers.length;
+                    return Math.max(1, Math.ceil(total / (this.pageSize || 5)));
+                },
+
+                get pagedUsers() {
+                    const totalPages = this.totalPages;
+                    if (this.currentPage > totalPages) this.currentPage = totalPages;
+                    if (this.currentPage < 1) this.currentPage = 1;
+                    const start = (this.currentPage - 1) * this.pageSize;
+                    return this.filteredUsers.slice(start, start + this.pageSize);
+                },
+
+                nextPage() {
+                    if (this.currentPage < this.totalPages) this.currentPage += 1;
+                },
+
+                prevPage() {
+                    if (this.currentPage > 1) this.currentPage -= 1;
                 },
 
                 async loadUsers() {
@@ -119,6 +233,12 @@
                     const result = await apiRequest('/api/users', { method: 'GET' });
                     if (result.ok && result.data.success) {
                         this.users = result.data.users || [];
+                        // 让 admin 靠前，便于管理
+                        this.users.sort((a, b) => {
+                            if (a.username === 'admin') return -1;
+                            if (b.username === 'admin') return 1;
+                            return (a.username || '').localeCompare(b.username || '');
+                        });
                     } else {
                         this.errorMessage = result.data.message || '加载用户失败';
                     }
@@ -136,6 +256,7 @@
                         this.newUsername = '';
                         this.newPassword = '';
                         await this.loadUsers();
+                        this.currentPage = 1;
                     } else {
                         this.errorMessage = result.data.message || '创建失败';
                     }
