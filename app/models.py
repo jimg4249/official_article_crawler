@@ -19,7 +19,6 @@ class ArticlesByUrlRequest(BaseModel):
     password: str | None = Field(default=None, description="后台密码")
     url: str = Field(..., description="公众号文章链接")
     number: int = Field(default=20, ge=1, description="需要获取的文章总条数")
-    wechat_username: str | None = Field(default=None, description="使用哪个后台账号的公众号会话（默认admin）")
 
 class LoginRequest(BaseModel):
     username: str = Field(..., description="用户名")
@@ -46,7 +45,6 @@ class WechatApiAuthRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
     username: str | None = Field(default=None, description="后台账号")
     password: str | None = Field(default=None, description="后台密码")
-    wechat_username: str | None = Field(default=None, description="使用哪个后台账号的公众号会话（默认等于 username）")
 
 class RegisterRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
