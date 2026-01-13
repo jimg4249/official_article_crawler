@@ -15,6 +15,8 @@ class ExtractBizRequest(BaseModel):
     url: str = Field(..., description="公众号文章链接")
 class ArticlesByUrlRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
+    username: str | None = Field(default=None, description="后台账号")
+    password: str | None = Field(default=None, description="后台密码")
     url: str = Field(..., description="公众号文章链接")
     number: int = Field(default=20, ge=1, description="需要获取的文章总条数")
     wechat_username: str | None = Field(default=None, description="使用哪个后台账号的公众号会话（默认admin）")
@@ -39,3 +41,14 @@ class NotificationConfigRequest(BaseModel):
 class UserCreateRequest(BaseModel):
     username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
+
+class WechatApiAuthRequest(BaseModel):
+    api_token: str | None = Field(default=None, description="鉴权密钥")
+    username: str | None = Field(default=None, description="后台账号")
+    password: str | None = Field(default=None, description="后台密码")
+    wechat_username: str | None = Field(default=None, description="使用哪个后台账号的公众号会话（默认等于 username）")
+
+class RegisterRequest(BaseModel):
+    api_token: str | None = Field(default=None, description="鉴权密钥")
+    username: str = Field(..., description="要注册的账号")
+    password: str | None = Field(default=None, description="密码（为空则默认 123456）")

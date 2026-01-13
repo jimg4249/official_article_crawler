@@ -21,6 +21,8 @@ from app.models import (
     ChangePasswordRequest,
     NotificationConfigRequest,
     UserCreateRequest,
+    WechatApiAuthRequest,
+    RegisterRequest,
 )
 from app.wechat import get_wechat_client, close_all_wechat_clients
 from app.auth import (
@@ -33,6 +35,7 @@ from app.auth import (
     create_user,
     delete_user,
     is_admin,
+    get_user_by_username,
 )
 from app.notification import NotificationSender
 from app.utils import log
@@ -40,6 +43,29 @@ from app.utils import log
 scheduler = AsyncIOScheduler()
 request_semaphore = asyncio.Semaphore(5)
 last_notification_time_by_user: dict[str, int] = {}
+
+# 对外二维码静态文件目录（用当前域名访问）
+qrcode_dir = get_cache_dir() / "qrcodes"
+qrcode_dir.mkdir(parents=True, exist_ok=True)
+
+def _check_api_token(api_token: str | None) -> tuple[bool, str]:
+    token_env = os.getenv("API_TOKEN")
+    if token_env is not None and token_env != "" and token_env != api_token:
+        return False, "密钥不正确"
+    return True, ""
+
+def _check_account(username: str | None, password: str | None) -> tuple[bool, str]:
+    if not username or not password:
+        return False, "需要提供账号密码"
+    if not verify_user(username, password):
+        return False, "账号或密码错误"
+    return True, ""
+
+def _resolve_wechat_username(caller_username: str, requested: str | None) -> tuple[bool, str, str]:
+    target = (requested or caller_username).strip() or caller_username
+    if target != caller_username and not is_admin(caller_username):
+        return False, "无权限：仅管理员可操作其他账号的公众号会话", ""
+    return True, "", target
 
 class ConcurrencyLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -222,13 +248,19 @@ app.add_middleware(ConcurrencyLimitMiddleware)
 
 @app.post("/articles-by-url")
 async def get_articles_by_url(request: ArticlesByUrlRequest) -> dict[str, Any]:
-    if (os.getenv("API_TOKEN") != "" and os.getenv("API_TOKEN") is not None) and os.getenv("API_TOKEN") != request.api_token:
-        return {
-            "success": False,
-            "message": "密钥不正确",
-        }
+    ok, msg = _check_api_token(request.api_token)
+    if not ok:
+        return {"success": False, "message": msg}
 
-    wechat_username = (request.wechat_username or "admin").strip() or "admin"
+    ok, msg = _check_account(request.username, request.password)
+    if not ok:
+        return {"success": False, "message": msg}
+
+    caller = (request.username or "").strip()
+    ok, msg, wechat_username = _resolve_wechat_username(caller, request.wechat_username)
+    if not ok:
+        return {"success": False, "message": msg}
+
     client = get_wechat_client(wechat_username)
     if not client.token:
         return {
@@ -319,6 +351,144 @@ async def get_articles_by_url(request: ArticlesByUrlRequest) -> dict[str, Any]:
 
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/qrcodes", StaticFiles(directory=str(qrcode_dir)), name="qrcodes")
+
+@app.post("/api/wechat/qrcode")
+async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
+    ok, msg = _check_api_token(body.api_token)
+    if not ok:
+        return JSONResponse(status_code=401, content={"success": False, "message": msg})
+
+    ok, msg = _check_account(body.username, body.password)
+    if not ok:
+        return JSONResponse(status_code=401, content={"success": False, "message": msg})
+
+    caller = (body.username or "").strip()
+    ok, msg, wechat_username = _resolve_wechat_username(caller, body.wechat_username)
+    if not ok:
+        return JSONResponse(status_code=403, content={"success": False, "message": msg})
+
+    client = get_wechat_client(wechat_username)
+    try:
+        qrcode_bytes = await client.init_login()
+        file_name = f"qrcode_{wechat_username}.png"
+        file_path = qrcode_dir / file_name
+        file_path.write_bytes(qrcode_bytes)
+
+        base = str(request.base_url).rstrip("/")
+        qrcode_url = f"{base}/qrcodes/{file_name}?t={int(time.time())}"
+        return JSONResponse(
+            content={
+                "success": True,
+                "wechat_username": wechat_username,
+                "qrcode_url": qrcode_url,
+            }
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "message": f"获取二维码失败: {str(e)}"})
+
+@app.post("/api/wechat/status")
+async def api_wechat_status(body: WechatApiAuthRequest):
+    ok, msg = _check_api_token(body.api_token)
+    if not ok:
+        return JSONResponse(status_code=401, content={"success": False, "message": msg})
+
+    ok, msg = _check_account(body.username, body.password)
+    if not ok:
+        return JSONResponse(status_code=401, content={"success": False, "message": msg})
+
+    caller = (body.username or "").strip()
+    ok, msg, wechat_username = _resolve_wechat_username(caller, body.wechat_username)
+    if not ok:
+        return JSONResponse(status_code=403, content={"success": False, "message": msg})
+
+    client = get_wechat_client(wechat_username)
+    try:
+        result = await client.is_online()
+        online = bool(result.get("online"))
+        login_time = int(client.login_time or 0) if online else 0
+        logout_time = int(client.logout_time or 0) if not online else 0
+
+        duration_seconds = 0
+        duration_text = ""
+        if online and login_time:
+            duration_seconds = max(0, int(time.time()) - login_time)
+            h = duration_seconds // 3600
+            m = (duration_seconds % 3600) // 60
+            s = duration_seconds % 60
+            if h > 0:
+                duration_text = f"{h}小时{m}分{s}秒"
+            elif m > 0:
+                duration_text = f"{m}分{s}秒"
+            else:
+                duration_text = f"{s}秒"
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "wechat_username": wechat_username,
+                "data": {
+                    "online": online,
+                    "message": result.get("message", ""),
+                    "nickname": result.get("nickname", ""),
+                    "headimgurl": result.get("headimgurl", ""),
+                    "login_time": login_time,
+                    "logout_time": logout_time,
+                    "login_duration_seconds": duration_seconds,
+                    "login_duration_text": duration_text,
+                },
+            }
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "message": f"检查状态失败: {str(e)}"})
+
+@app.post("/api/register")
+async def api_register(body: RegisterRequest):
+    ok, msg = _check_api_token(body.api_token)
+    if not ok:
+        return JSONResponse(status_code=401, content={"success": False, "message": msg})
+
+    username = (body.username or "").strip()
+    password = (body.password or "").strip() or "123456"
+
+    existed = get_user_by_username(username)
+    if existed:
+        return JSONResponse(
+            content={
+                "success": True,
+                "user": {
+                    "username": existed.get("username", username),
+                    "is_admin": bool(existed.get("is_admin")) or existed.get("username") == "admin",
+                },
+            }
+        )
+
+    ok, msg = create_user(username, password, is_admin_user=False)
+    if not ok:
+        # 幂等：如果并发下刚好已存在，也直接返回账号信息
+        existed = get_user_by_username(username)
+        if existed:
+            return JSONResponse(
+                content={
+                    "success": True,
+                    "user": {
+                        "username": existed.get("username", username),
+                        "is_admin": bool(existed.get("is_admin")) or existed.get("username") == "admin",
+                    },
+                }
+            )
+        return JSONResponse(status_code=400, content={"success": False, "message": msg})
+
+    created = get_user_by_username(username) or {"username": username, "is_admin": False}
+    return JSONResponse(
+        content={
+            "success": True,
+            "user": {
+                "username": created.get("username", username),
+                "is_admin": bool(created.get("is_admin")),
+            },
+        }
+    )
 
 @app.get("/", response_class=HTMLResponse)
 async def admin_login_page(request: Request):
