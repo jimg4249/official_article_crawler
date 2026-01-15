@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.auth import init_users, load_users
 from app.middleware import ConcurrencyLimitMiddleware, PersistentSessionMiddleware
 from app.routes.admin import router as admin_router
-from app.routes.external import qrcode_dir, router as external_router
+from app.routes.external import router as external_router
 from app.tasks import WechatTaskRunner
 from app.utils import log
 from app.wechat import close_all_wechat_clients, get_wechat_client
@@ -49,7 +49,6 @@ app.add_middleware(ConcurrencyLimitMiddleware)
 
 # 静态资源
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-app.mount("/qrcodes", StaticFiles(directory=str(qrcode_dir)), name="qrcodes")
 
 # 路由
 app.include_router(external_router)

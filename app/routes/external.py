@@ -1,3 +1,4 @@
+import base64
 import os
 import time
 
@@ -6,14 +7,9 @@ from fastapi.responses import JSONResponse
 
 from app.auth import create_user, get_user_by_username
 from app.models import ArticlesByUrlRequest, RegisterRequest, WechatApiAuthRequest
-from app.utils import get_cache_dir
 from app.wechat import get_wechat_client
 
 router = APIRouter()
-
-# 对外二维码静态文件目录（main.py 负责 mount）
-qrcode_dir = get_cache_dir() / "qrcodes"
-qrcode_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _check_api_token(api_token: str | None) -> tuple[bool, str]:
@@ -145,19 +141,13 @@ async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
     client = get_wechat_client(wechat_username)
     try:
         qrcode_bytes = await client.init_login()
-        file_name = f"qrcode_{wechat_username}.png"
-        file_path = qrcode_dir / file_name
-        file_path.write_bytes(qrcode_bytes)
-
-        qrcode_path = f"/qrcodes/{file_name}?t={int(time.time())}"
-        base_url = (body.base_url or str(request.base_url)).rstrip("/")
-        qrcode_url = f"{base_url}{qrcode_path}"
+        qrcode_base64 = base64.b64encode(qrcode_bytes).decode("ascii")
         return JSONResponse(
             content={
                 "success": True,
                 "data": {
-                    "qrcode_url": qrcode_url
-                } 
+                    "qrcode_base64": qrcode_base64,
+                },
             }
         )
     except Exception as e:
