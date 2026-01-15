@@ -149,8 +149,7 @@ async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
         file_path = qrcode_dir / file_name
         file_path.write_bytes(qrcode_bytes)
 
-        base = str(request.base_url).rstrip("/")
-        qrcode_url = f"{base}/qrcodes/{file_name}?t={int(time.time())}"
+        qrcode_url = f"/qrcodes/{file_name}?t={int(time.time())}"
         return JSONResponse(
             content={
                 "success": True,
