@@ -43,6 +43,7 @@ class UserCreateRequest(BaseModel):
 class WechatApiAuthRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
     username: str | None = Field(default=None, description="账号（用于选择公众号会话）")
+    base_url: str | None = Field(default=None, description="可选。用于拼接二维码完整URL的base_url，例如 https://example.com")
 
 class RegisterRequest(BaseModel):
     api_token: str | None = Field(default=None, description="鉴权密钥")
