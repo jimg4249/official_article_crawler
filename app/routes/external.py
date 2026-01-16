@@ -141,7 +141,7 @@ async def api_wechat_qrcode(request: Request, body: WechatApiAuthRequest):
     client = get_wechat_client(wechat_username)
     try:
         qrcode_bytes = await client.init_login()
-        qrcode_base64 = base64.b64encode(qrcode_bytes).decode("ascii")
+        qrcode_base64 = "data:image/png;base64," + base64.b64encode(qrcode_bytes).decode("ascii")
         return JSONResponse(
             content={
                 "success": True,
